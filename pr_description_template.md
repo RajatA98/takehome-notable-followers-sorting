@@ -59,7 +59,7 @@ You were correct. On the Notable Followers table, sorting by number of followers
 The fix is on its way to release. Once it is live, please click the Followers header again to confirm the order looks correct on your end. If anything still appears off, or if you notice similar behavior on another table, please reply here and I will look into it. Thank you again for helping us improve this.
 
 Best regards,
-Rajat
+Rajat Arora
 
 ## Team Follow-Up Message
 
@@ -71,4 +71,4 @@ The fix is in `sortUtils.ts` and remains generic. A column is now treated as num
 
 One item worth a broader discussion: the underlying issue is that numeric fields reach the frontend as strings, which forces the table to infer types at all. The cleaner long term solution is to parse these into real numbers when the API response enters the application, which removes the inference for every table at once. I am happy to take this on as a separate piece of work if we agree it is worthwhile. Please let me know if you would like to discuss any of it.
 
-Rajat
+Rajat Arora
