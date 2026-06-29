@@ -2,71 +2,73 @@
 
 ## Summary
 
-This fixes the Notable Followers table so that sorting by follower count puts the biggest accounts where you expect them. Descending now shows the largest first and ascending shows the smallest first.
+This change fixes the Notable Followers table so that sorting by follower count orders accounts correctly. Descending now lists the largest accounts first and ascending lists the smallest first.
 
-The real problem was not the Followers column on its own. It was the shared sorting helper guessing the wrong type for the column, so I fixed the guessing logic in one place rather than patching the single column. I also corrected a smaller, hidden issue in how the descending direction was applied. Everything stays inside the generic helper, so the other tables and columns keep working the way they did.
+The issue was not isolated to the Followers column. The shared sorting helper was inferring the wrong data type for the column, so I addressed the inference logic itself rather than patching a single column. I also corrected a smaller, latent issue in how the descending direction was applied. All changes are contained within the generic helper, so the other tables and columns continue to behave exactly as before.
 
 ## Root Cause
 
-Our API hands follower counts to the frontend as text, so a value like one million arrives as the string "1000000" rather than the number 1000000.
+Our API delivers follower counts to the frontend as text. A value such as one million arrives as the string "1000000" rather than the number 1000000.
 
-The sorting helper tries to auto detect whether a column holds numbers or text, and it only treated a column as numeric when the value was already a real number. Since the counts come in as text, the helper decided the whole column was text and sorted it alphabetically. Alphabetical order compares character by character and ignores length, so "1000000" lands ahead of "500000" simply because it starts with a "1". The descending step then flipped that list, which dropped the one million row all the way to the bottom, underneath the five hundred thousand rows. That is exactly what the customer saw.
+The sorting helper attempts to auto detect whether a column holds numbers or text, but it only classified a column as numeric when the value was already a real number. Because the counts arrive as text, the helper classified the entire column as text and sorted it alphabetically. Alphabetical comparison evaluates character by character and disregards length, so "1000000" is ordered ahead of "500000" purely because it begins with a "1". The descending step then reversed that result, which placed the one million row at the bottom, beneath the five hundred thousand rows. This matched the behavior the customer reported.
 
-So this was a general weakness in how the helper detects numbers, and the Followers column was just the place where it became visible.
+In short, this was a general weakness in the helper's numeric detection. The Followers column was simply where it became visible to a customer.
 
 ## Source of Truth
 
-I used the actual numeric value of each follower count as the source of truth, backed by two signals already in the project.
+I treated the actual numeric value of each follower count as the source of truth, supported by two signals already present in the project.
 
-First, the product itself states the intent right on the page: "Largest should be on top." Follower counts are quantities, and a quantity of one million is plainly larger than five hundred thousand regardless of how the text happens to be stored. Sorting by magnitude is the only reading that matches what the column means.
+First, the product states the intended behavior directly on the page: "Largest should be on top." Follower counts are quantities, and one million is larger than five hundred thousand regardless of how the value is stored as text. Ordering by magnitude is the only interpretation consistent with what the column represents.
 
-Second, the acceptance test in the repo encodes that same expectation. It expects John Crist with one million followers to sit at the top when sorting from the top down, and it checks that the whole column comes out in descending numeric order. Because the test described the correct behavior and the helper did not meet it, that confirmed the helper was wrong rather than the data or the test.
+Second, the acceptance test in the repository encodes the same expectation. It requires John Crist, with one million followers, to appear at the top when sorting from the top down, and it verifies that the full column is returned in descending numeric order. Because the test described the correct behavior and the helper did not satisfy it, this confirmed that the defect was in the helper rather than in the data or the test.
 
 ## Implementation
 
-I made the fix in `src/sortUtils.ts`, which is the shared helper every table uses. That is the right place because the bug lives in the type detection, not in the Followers column or its data. Fixing it here repairs the cause once for every current and future column that arrives as numeric text, and it avoids hard coding anything specific to followers.
+I made the fix in `src/sortUtils.ts`, the shared helper used by every table. This is the appropriate location because the defect is in the type detection, not in the Followers column or its data. Correcting it here resolves the underlying cause once for every current and future column that arrives as numeric text, and it avoids introducing anything specific to the Followers column.
 
-There are three small changes:
+The change consists of three focused parts:
 
-1. I added a helper that decides whether a value is really a number. It returns true for an actual number and for a text value that cleanly parses to a finite number, and false for blanks and ordinary words.
+1. I added a helper that determines whether a value genuinely represents a number. It returns true for an actual number and for a text value that parses cleanly to a finite number, and false for blank values and ordinary text.
 
-2. I changed the column type detection so a column counts as numeric only when every non empty value in it is numeric, and I made it look across all the values instead of only the first one. This is what lets the follower counts sort by magnitude, while genuine text columns like Username and Country still sort alphabetically. Looking at every value also stops one stray entry from mislabeling a whole column.
+2. I updated the column type detection so that a column is classified as numeric only when every non empty value within it is numeric, and I had it evaluate all values rather than only the first. This allows the follower counts to sort by magnitude while genuine text columns such as Username and Country continue to sort alphabetically. Evaluating every value also prevents a single outlier from misclassifying an entire column.
 
-3. I changed how the descending direction is applied. It used to sort ascending and then reverse the entire list. Reversing also flips rows that are tied, which can make equal rows jump around when you toggle direction. I now flip the comparison itself for descending, which lets the stable sort keep tied rows in their original order in both directions.
+3. I revised how the descending direction is applied. Previously the helper sorted ascending and then reversed the entire list. Reversing also inverts rows that are tied, which can cause equal rows to shift position when the direction is toggled. The helper now inverts the comparison itself for descending order, which allows the stable sort to preserve the original order of tied rows in both directions.
 
-I did not touch the data, the test, the column definitions, or the table component.
+I did not modify the data, the test, the column definitions, or the table component.
 
 ## Regression Prevention
 
-A few things make this less likely to come back.
+Several aspects of this change reduce the likelihood of the bug returning.
 
-The fix sits in the one shared helper, so there is a single, well commented place that defines how columns are typed and sorted, rather than column by column patches scattered around. The comments explain why numeric text is treated as numeric and why descending flips the comparison instead of reversing, so the next person changing this code understands the intent.
+The fix lives in a single shared helper, so there is one clearly documented place that defines how columns are typed and sorted, rather than scattered per column patches. The accompanying comments explain why numeric text is treated as numeric and why descending inverts the comparison rather than reversing the list, so future contributors can understand the intent.
 
-The provided test now passes and pins the expected behavior for follower counts in both directions, so a future change that reintroduces alphabetical sorting would fail the suite. Beyond this PR, I would add a few more tests to the same file to lock in the surrounding cases: that text columns like Username and Country still sort alphabetically, that tied rows keep a stable order, and that mixed or blank values behave predictably. Those guard the exact corners that made this bug easy to introduce in the first place.
+The provided test now passes and pins the expected behavior for follower counts in both directions, so any change that reintroduced alphabetical sorting would fail the suite. Beyond this change, I would add a small number of further tests to the same file to lock in the surrounding cases: that text columns such as Username and Country still sort alphabetically, that tied rows retain a stable order, and that mixed or blank values behave predictably. These cover the precise conditions that made the original defect easy to introduce.
 
-Longer term, the most durable prevention is to convert these values to real numbers when the API response first enters the app, so the table layer never has to guess a type at all. I have written that up as a follow up rather than expanding the scope of this fix.
+Looking further ahead, the most durable safeguard would be to convert these values to real numbers at the point the API response enters the application, so the table layer never has to infer a type. I have noted this as a follow up rather than expanding the scope of the present fix.
 
 # Communication
 
 ## Customer Follow-Up Message
 
-Hi, thanks so much for flagging this and for the clear example, it made the problem easy to track down.
+Hello,
 
-You were right. On the Notable Followers table, sorting by number of followers was ordering the accounts as if the counts were text instead of numbers, which is why an account with one million followers could end up below accounts with five hundred thousand. We have corrected it. Sorting from the top now puts the largest accounts first, and sorting the other way puts the smallest first, across the whole list.
+Thank you for reporting this, and for the clear example. It made the issue straightforward to diagnose.
 
-The fix is on its way out. Once it is live, please give the Followers header another click and let me know it looks right to you. If anything still seems off, or if you spot similar ordering on another table, just reply here and I will jump on it. Thanks again for helping us make this better.
+You were correct. On the Notable Followers table, sorting by number of followers was ordering the accounts as though the counts were text rather than numbers, which is why an account with one million followers could appear below accounts with five hundred thousand. We have corrected this. Sorting from the top now places the largest accounts first, and sorting in the opposite direction places the smallest first, consistently across the full list.
 
-Best,
+The fix is on its way to release. Once it is live, please click the Followers header again to confirm the order looks correct on your end. If anything still appears off, or if you notice similar behavior on another table, please reply here and I will look into it. Thank you again for helping us improve this.
+
+Best regards,
 Rajat
 
 ## Team Follow-Up Message
 
-Heads up on the Notable Followers sorting bug a customer reported, where a one million follower account sorted below five hundred thousand ones.
+Sharing a summary of the Notable Followers sorting issue a customer reported, where an account with one million followers sorted below accounts with five hundred thousand.
 
-Root cause: the API sends follower counts as strings, and our shared sort helper in `sortUtils.ts` only treated a column as numeric when the value was already a real number. So the column was detected as text and sorted alphabetically, where "1000000" comes before "500000". The descending step then reversed that, pushing the largest value to the bottom. It was a general type detection gap, not something specific to the Followers column.
+Root cause: the API returns follower counts as strings, and our shared sort helper in `sortUtils.ts` only classified a column as numeric when the value was already a real number. As a result the column was detected as text and sorted alphabetically, where "1000000" precedes "500000", and the descending step then reversed that order and moved the largest value to the bottom. This was a general gap in type detection rather than an issue specific to the Followers column.
 
-Fix is in `sortUtils.ts` and stays generic. The column is now treated as numeric when all of its non empty values parse as numbers, and the detector scans every value rather than just the first so one outlier cannot mistype a column. I also replaced the reverse based descending with flipping the comparison, which keeps tied rows stable when you toggle direction. The existing test passes and other columns like Username and Country are unaffected.
+The fix is in `sortUtils.ts` and remains generic. A column is now treated as numeric when all of its non empty values parse as numbers, and the detector evaluates every value rather than only the first so that an outlier cannot misclassify a column. I also replaced the reverse based descending logic with an inverted comparison, which keeps tied rows stable when the direction is toggled. The existing test passes and the other columns, including Username and Country, are unaffected.
 
-One thing worth a wider conversation: the deeper issue is that numeric fields reach the frontend as strings, so the table is forced to guess types at all. The cleaner long term fix is to parse these into real numbers when the API response enters the app, which removes the guessing for every table at once. Happy to pick that up as a separate piece of work if we agree it is worth it. Shout if you want to talk through any of it.
+One item worth a broader discussion: the underlying issue is that numeric fields reach the frontend as strings, which forces the table to infer types at all. The cleaner long term solution is to parse these into real numbers when the API response enters the application, which removes the inference for every table at once. I am happy to take this on as a separate piece of work if we agree it is worthwhile. Please let me know if you would like to discuss any of it.
 
 Rajat
