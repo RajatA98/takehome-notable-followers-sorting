@@ -63,12 +63,17 @@ Rajat Arora
 
 ## Team Follow-Up Message
 
-Sharing a summary of the Notable Followers sorting issue a customer reported, where an account with one million followers sorted below accounts with five hundred thousand.
+Hi team,
 
-Root cause: the API returns follower counts as strings, and our shared sort helper in `sortUtils.ts` only classified a column as numeric when the value was already a real number. As a result the column was detected as text and sorted alphabetically, where "1000000" precedes "500000", and the descending step then reversed that order and moved the largest value to the bottom. This was a general gap in type detection rather than an issue specific to the Followers column.
+I wanted to share a quick summary of the Notable Followers sorting issue a customer reported, where an account with one million followers was appearing below accounts with five hundred thousand, along with the fix I have put up for review.
 
-The fix is in `sortUtils.ts` and remains generic. A column is now treated as numeric when all of its non empty values parse as numbers, and the detector evaluates every value rather than only the first so that an outlier cannot misclassify a column. I also replaced the reverse based descending logic with an inverted comparison, which keeps tied rows stable when the direction is toggled. The existing test passes and the other columns, including Username and Country, are unaffected.
+On the root cause: our API returns follower counts as strings, and our shared sort helper in `sortUtils.ts` only classified a column as numeric when the value was already a real number. As a result the column was detected as text and sorted alphabetically, where "1000000" precedes "500000", and the descending step then reversed that order and moved the largest value to the bottom. This was a general gap in our type detection rather than an issue specific to the Followers column.
 
-One item worth a broader discussion: the underlying issue is that numeric fields reach the frontend as strings, which forces the table to infer types at all. The cleaner long term solution is to parse these into real numbers when the API response enters the application, which removes the inference for every table at once. I am happy to take this on as a separate piece of work if we agree it is worthwhile. Please let me know if you would like to discuss any of it.
+The fix is in `sortUtils.ts` and stays generic. A column is now treated as numeric when all of its non empty values parse as numbers, and the detector evaluates every value rather than only the first, so that a single outlier cannot misclassify a column. I also replaced the reverse based descending logic with an inverted comparison, which keeps tied rows stable when the direction is toggled. The existing test passes and the other columns, including Username and Country, are unaffected.
 
+There is one item I think is worth a broader discussion. The underlying problem is that numeric fields reach the frontend as strings, which is what forces the table to infer types in the first place. The cleaner long term solution is to parse these into real numbers when the API response enters the application, which would remove the inference for every table at once. I am happy to take this on as a separate piece of work if we feel it is worthwhile.
+
+Please take a look at the pull request when you have a moment, and let me know if you have any questions or feedback.
+
+Best regards,
 Rajat Arora
